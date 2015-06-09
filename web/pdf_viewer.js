@@ -712,7 +712,8 @@ var PDFViewer = (function pdfViewer() {
         textLayerDiv: textLayerDiv,
         pageIndex: pageIndex,
         viewport: viewport,
-        findController: this.isInPresentationMode ? null : this.findController
+        findController: this.isInPresentationMode ? null : this.findController,
+        multiSelectionController: this.isInPresentationMode? null: this.multiSelectionController
       });
     },
 
@@ -732,6 +733,10 @@ var PDFViewer = (function pdfViewer() {
     setFindController: function (findController) {
       this.findController = findController;
     },
+
+    setMultiSelectionController: function (multiSelectionController) {
+      this.multiSelectionController = multiSelectionController;
+    }
   };
 
   return PDFViewer;

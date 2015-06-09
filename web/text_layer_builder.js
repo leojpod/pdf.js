@@ -48,9 +48,11 @@ var TextLayerBuilder = (function TextLayerBuilderClosure() {
     this.pageIdx = options.pageIndex;
     this.pageNumber = this.pageIdx + 1;
     this.matches = [];
+    this.selections = [];
     this.viewport = options.viewport;
     this.textDivs = [];
     this.findController = options.findController || null;
+    this.multiSelectionController = options.multiSelectionController || null;
   }
 
   TextLayerBuilder.prototype = {
@@ -120,6 +122,7 @@ var TextLayerBuilder = (function TextLayerBuilderClosure() {
       this.textLayerDiv.appendChild(textLayerFrag);
       this._finishRendering();
       this.updateMatches();
+      this.updateSelections();
     },
 
     /**
@@ -214,6 +217,19 @@ var TextLayerBuilder = (function TextLayerBuilderClosure() {
         this.appendText(textItems[i], textContent.styles);
       }
       this.divContentDone = true;
+    },
+
+    convertSelections: function TextLayerBuilder_convertSelection(selections) {
+      // TODO convert an array of Range into an array of object similar to the converted match
+
+    },
+
+    renderSelections: function TextLayerBuilder_renderSelections(selections) {
+      // TODO follow inspiration from render Match and deal with that.
+    },
+
+    updateSelections: function TextLayerBuilder_updateSelections() {
+      // TODO adapt updateMatches
     },
 
     convertMatches: function TextLayerBuilder_convertMatches(matches) {
@@ -391,6 +407,8 @@ var TextLayerBuilder = (function TextLayerBuilderClosure() {
       // used for the textLayer.
       this.matches = this.convertMatches(this.findController === null ?
         [] : (this.findController.pageMatches[this.pageIdx] || []));
+      console.log('a match -> ');
+      console.log(this.matches[0]);
       this.renderMatches(this.matches);
     }
   };

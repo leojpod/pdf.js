@@ -94,7 +94,7 @@ var mozL10n = document.mozL10n || document.webL10n;
 //#include pdf_thumbnail_viewer.js
 //#include pdf_outline_view.js
 //#include pdf_attachment_view.js
-//#include pdf_multiselection.js
+//#include pdf_multi_selection_controller.js
 
 var PDFViewerApplication = {
   initialBookmark: document.location.hash.substring(1),
@@ -169,6 +169,8 @@ var PDFViewerApplication = {
       integratedFind: this.supportsIntegratedFind
     });
     this.pdfViewer.setFindController(this.findController);
+    this.multiSelectionController = new PDFMultiSelectionController();
+    this.pdfViewer.setMultiSelectionController(this.multiSelectionController);
 
     this.findBar = new PDFFindBar({
       bar: document.getElementById('findbar'),
