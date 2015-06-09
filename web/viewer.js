@@ -94,6 +94,7 @@ var mozL10n = document.mozL10n || document.webL10n;
 //#include pdf_thumbnail_viewer.js
 //#include pdf_outline_view.js
 //#include pdf_attachment_view.js
+//#include pdf_multiselection.js
 
 var PDFViewerApplication = {
   initialBookmark: document.location.hash.substring(1),
