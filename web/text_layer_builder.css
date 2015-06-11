@@ -61,3 +61,24 @@
 
 .textLayer ::selection { background: rgb(255,255,0); }
 .textLayer ::-moz-selection { background: rgb(255,255,0); }
+
+
+.textLayer .selection {
+    margin: -1px;
+    padding: 1px;
+
+    background-color: rgb(255, 255, 0);
+    border-radius: 4px;
+}
+
+.textLayer .selection.begin {
+    border-radius: 4px 0px 0px 4px;
+}
+
+.textLayer .selection.end {
+    border-radius: 0px 4px 4px 0px;
+}
+
+.textLayer .selection.middle {
+    border-radius: 0px;
+}

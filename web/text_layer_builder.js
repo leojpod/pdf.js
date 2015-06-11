@@ -114,7 +114,7 @@ var TextLayerBuilder = (function TextLayerBuilderClosure() {
             transform = 'rotate(' + rotation + 'deg) ' + transform;
           }
           if (transform) {
-            CustomStyle.setProp('transform' , textDiv, transform);
+            CustomStyle.setProp('transform', textDiv, transform);
           }
         }
       }
@@ -144,7 +144,7 @@ var TextLayerBuilder = (function TextLayerBuilderClosure() {
         this.renderLayer();
       } else { // Schedule
         var self = this;
-        this.renderTimer = setTimeout(function() {
+        this.renderTimer = setTimeout(function () {
           self.renderLayer();
           self.renderTimer = null;
         }, timeout);
@@ -221,15 +221,188 @@ var TextLayerBuilder = (function TextLayerBuilderClosure() {
 
     convertSelections: function TextLayerBuilder_convertSelection(selections) {
       // TODO convert an array of Range into an array of object similar to the converted match
+      var i = 0;
+      var convertedSelections = [];
 
+      var getIndex = function () {
+        var prop = document.body.previousElementSibling ? 'previousElementSibling' : 'previousSibling';
+
+        return function (node) {
+          var idx = 1;
+          while (node = node[prop]) {
+            ++idx
+          }
+          return idx;
+        }
+      }();
+
+      for (var s = 0, len = selections.length; s < len; s += 1) {
+        // Range selection:
+        var range = selections[s];
+        //debugger;
+        //make sure the range apply to this TextLayer:
+        // for now:
+        if (range.startContainer.parentElement.parentElement === this.textLayerDiv &&
+            range.endContainer.parentElement.parentElement === this.textLayerDiv) {
+          //then the range belongs here
+          // 1 - identify where it starts
+          var inPageSelection = {
+            begin: {
+              divIdx: getIndex(range.startContainer),
+              offset: range.startOffset
+            },
+            end: {
+              divIdx: getIndex(range.endContainer),
+              offset: range.endOffset
+            }
+          };
+          convertedSelections.push(inPageSelection);
+        } //else // TODO deal with multi-page selection
+
+      }
+      console.log('converted ', convertedSelections.length, ' out of ', selections.length, ' original ranges');
+      return convertedSelections;
     },
 
     renderSelections: function TextLayerBuilder_renderSelections(selections) {
       // TODO follow inspiration from render Match and deal with that.
+      // Early exit if there is nothing to render
+      if (selections.length === 0) {
+        return;
+      }
+      console.log('render selections');
+
+      var bidiTexts = this.textContent.items;
+      var textDivs = this.textDivs;
+      var prevEnd = null;
+      var infinity = {
+        divIdx: -1,
+        offset: undefined
+      };
+      var len = selections.length;
+
+      // utility methods (from TextLayerBuilder_renderMatches)
+      /**
+       * given a `begin` object, will fetch the correct textDiv (begin.divIdx),
+       * clear it, and rewrite all the text up to the starting point (begin.offset)
+       * @param begin
+       * @param className
+       */
+      function beginText(begin, className) {
+        var divIdx = begin.divIdx;
+        textDivs[divIdx].textContent = '';
+        appendTextToDiv(divIdx, 0, begin.offset, className);
+      }
+
+      /**
+       * fetch the div, and copy part of the original text in it (fromOffset -> toOffset),
+       * apply the given style (className) to it in the process.
+       *
+       * @param divIdx
+       * @param fromOffset
+       * @param toOffset
+       * @param className
+       */
+      function appendTextToDiv(divIdx, fromOffset, toOffset, className) {
+        var div = textDivs[divIdx];
+        var content = bidiTexts[divIdx].str.substring(fromOffset, toOffset);
+        var node = document.createTextNode(content);
+        if (className) {
+          var span = document.createElement('span');
+          span.className = className;
+          span.appendChild(node);
+          div.appendChild(span);
+          return;
+        }
+        div.appendChild(node);
+      }
+
+      //for each selection
+      debugger;
+      for (var i = 0; i < len; i++) {
+        var selection = selections[i];
+        var begin = selection.begin;
+        var end = selection.end;
+
+        // Match inside new div.
+        if (!prevEnd || begin.divIdx !== prevEnd.divIdx) {
+          // If there was a previous div, then add the text at the end.
+          if (prevEnd !== null) {
+            appendTextToDiv(prevEnd.divIdx, prevEnd.offset, infinity.offset);
+          }
+          // Clear the divs and set the content until the starting point.
+          beginText(begin);
+        } else {
+          //selection within same div
+          appendTextToDiv(prevEnd.divIdx, prevEnd.offset, begin.offset);
+        }
+
+        if (begin.divIdx === end.divIdx) {
+          appendTextToDiv(begin.divIdx, begin.offset, end.offset,
+              'selection' );
+        } else {
+          appendTextToDiv(begin.divIdx, begin.offset, infinity.offset,
+              'selection begin' );
+          for (var n0 = begin.divIdx + 1, n1 = end.divIdx; n0 < n1; n0++) {
+            textDivs[n0].className = 'selection middle' ;
+          }
+          beginText(end, 'selection end' );
+        }
+        prevEnd = end;
+      }
+
+      if (prevEnd) {
+        appendTextToDiv(prevEnd.divIdx, prevEnd.offset, infinity.offset);
+      }
     },
 
     updateSelections: function TextLayerBuilder_updateSelections() {
-      // TODO adapt updateMatches
+
+      console.info('updateSelections!');
+      // Only show matches when all rendering is done.
+      if (!this.renderingDone) {
+        return;
+      }
+
+      // <editor-fold desc="not needed selection clearing">
+      // NOTE: We don't need to clear selection for this use case but
+      // would we have too here is how we would do it.
+
+      /*
+       // Clear all selections.
+       var selections = this.selections;
+       var textDivs = this.textDivs;
+       var bidiTexts = this.textContent.items;
+       var clearedUntilDivIdx = -1;
+
+       // Clear all current selections.
+       // NOTE: i.e. locating all the div under selections and removing the class.
+       for (var i = 0, len = selections.length; i < len; i++) {
+       var match = selections[i];
+       var begin = Math.max(clearedUntilDivIdx, match.begin.divIdx);
+       for (var n = begin, end = match.end.divIdx; n <= end; n++) {
+       var div = textDivs[n];
+       div.textContent = bidiTexts[n].str;
+       div.className = '';
+       }
+       clearedUntilDivIdx = match.end.divIdx + 1;
+       }
+       */
+
+      // </editor-fold>
+
+      if (this.multiSelectionController === null) {
+        //run the multi-selection only if linked
+        return;
+      } // else
+
+      // Convert the selections on the controller into the selection format
+      // used for the textLayer.
+      this.selections = this.convertSelections(this.multiSelectionController === null ?
+          [] : (this.multiSelectionController.selections || []));
+      console.log('converted selections -> ', this.selections);
+      this.renderSelections(this.selections);
+
     },
 
     convertMatches: function TextLayerBuilder_convertMatches(matches) {
@@ -238,9 +411,10 @@ var TextLayerBuilder = (function TextLayerBuilderClosure() {
       var bidiTexts = this.textContent.items;
       var end = bidiTexts.length - 1;
       var queryLen = (this.findController === null ?
-                      0 : this.findController.state.query.length);
+          0 : this.findController.state.query.length);
       var ret = [];
 
+      debugger;
       for (var m = 0, len = matches.length; m < len; m++) {
         // Calculate the start position.
         var matchIdx = matches[m];
@@ -293,11 +467,11 @@ var TextLayerBuilder = (function TextLayerBuilderClosure() {
       var prevEnd = null;
       var pageIdx = this.pageIdx;
       var isSelectedPage = (this.findController === null ?
-        false : (pageIdx === this.findController.selected.pageIdx));
+          false : (pageIdx === this.findController.selected.pageIdx));
       var selectedMatchIdx = (this.findController === null ?
-                              -1 : this.findController.selected.matchIdx);
+          -1 : this.findController.selected.matchIdx);
       var highlightAll = (this.findController === null ?
-                          false : this.findController.state.highlightAll);
+          false : this.findController.state.highlightAll);
       var infinity = {
         divIdx: -1,
         offset: undefined
@@ -341,7 +515,7 @@ var TextLayerBuilder = (function TextLayerBuilderClosure() {
 
         if (this.findController) {
           this.findController.updateMatchPosition(pageIdx, i, textDivs,
-                                                  begin.divIdx, end.divIdx);
+              begin.divIdx, end.divIdx);
         }
 
         // Match inside new div.
@@ -358,10 +532,10 @@ var TextLayerBuilder = (function TextLayerBuilderClosure() {
 
         if (begin.divIdx === end.divIdx) {
           appendTextToDiv(begin.divIdx, begin.offset, end.offset,
-                          'highlight' + highlightSuffix);
+              'highlight' + highlightSuffix);
         } else {
           appendTextToDiv(begin.divIdx, begin.offset, infinity.offset,
-                          'highlight begin' + highlightSuffix);
+              'highlight begin' + highlightSuffix);
           for (var n0 = begin.divIdx + 1, n1 = end.divIdx; n0 < n1; n0++) {
             textDivs[n0].className = 'highlight middle' + highlightSuffix;
           }
@@ -406,7 +580,7 @@ var TextLayerBuilder = (function TextLayerBuilderClosure() {
       // Convert the matches on the page controller into the match format
       // used for the textLayer.
       this.matches = this.convertMatches(this.findController === null ?
-        [] : (this.findController.pageMatches[this.pageIdx] || []));
+          [] : (this.findController.pageMatches[this.pageIdx] || []));
       console.log('a match -> ');
       console.log(this.matches[0]);
       this.renderMatches(this.matches);
@@ -419,7 +593,8 @@ var TextLayerBuilder = (function TextLayerBuilderClosure() {
  * @constructor
  * @implements IPDFTextLayerFactory
  */
-function DefaultTextLayerFactory() {}
+function DefaultTextLayerFactory() {
+}
 DefaultTextLayerFactory.prototype = {
   /**
    * @param {HTMLDivElement} textLayerDiv
