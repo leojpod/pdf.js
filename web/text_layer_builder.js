@@ -220,8 +220,6 @@ var TextLayerBuilder = (function TextLayerBuilderClosure() {
     },
 
     convertSelections: function TextLayerBuilder_convertSelection(selections) {
-      // TODO convert an array of Range into an array of object similar to the converted match
-      var i = 0;
       var convertedSelections = [];
 
       var getIndex = function () {
@@ -236,6 +234,7 @@ var TextLayerBuilder = (function TextLayerBuilderClosure() {
         }
       }();
 
+      //debugger;
       for (var s = 0, len = selections.length; s < len; s += 1) {
         // Range selection:
         var range = selections[s];
@@ -248,11 +247,11 @@ var TextLayerBuilder = (function TextLayerBuilderClosure() {
           // 1 - identify where it starts
           var inPageSelection = {
             begin: {
-              divIdx: getIndex(range.startContainer),
+              divIdx: getIndex(range.startContainer.parentElement),
               offset: range.startOffset
             },
             end: {
-              divIdx: getIndex(range.endContainer),
+              divIdx: getIndex(range.endContainer.parentElement),
               offset: range.endOffset
             }
           };
@@ -318,7 +317,7 @@ var TextLayerBuilder = (function TextLayerBuilderClosure() {
       }
 
       //for each selection
-      debugger;
+      //debugger;
       for (var i = 0; i < len; i++) {
         var selection = selections[i];
         var begin = selection.begin;
