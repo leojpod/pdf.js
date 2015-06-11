@@ -41,34 +41,14 @@ var PDFMultiSelectionController = (function PDFMultiSelectionControllerClosure()
   PDFMultiSelectionController.prototype = {
     updateSelections: function PDFMultiSelectionController_updateSelection() {
       if (this.pdfViewer !== null) {
-        var currentPageIdx = this.pdfViewer.currentPageNumber - 1;
+        var visiblePages = this.pdfViewer._getVisiblePages().views;
         var page;
-        //update current page
-        page = this.pdfViewer.getPageView(currentPageIdx);
-        if (page.textLayer) {
-          page.textLayer.updateSelections();
-        }
-        // NOTE: careful with the following line,
-        // required to handle selection across pages BUT
-        // BUT it is also greatly dependant detecting if the commonAncestor is
-        // a TextLayer or the pdfviewer element ! Rely heavily on classNames
-        // and this could be broken in the future.
-        if (this.selections.length > 0 &&
-            this.selections[this.selections.length - 1].commonAncestorContainer.className !== 'textLayer') {
-          //then update the page before and the page after if they exist
-          if (currentPageIdx -1 > 0) {
-            page = this.pdfViewer.getPageView(currentPageIdx - 1);
-            if (page.textLayer) {
-              page.textLayer.updateSelections();
-            }
+        //update all the visible pages
+        for (var i = 0, len = visiblePages.length; i < len; i++) {
+          page = this.pdfViewer.getPageView(visiblePages[i].id - 1);
+          if (page.textLayer) {
+            page.textLayer.updateSelections();
           }
-          if (currentPageIdx  + 1 < this.pdfViewer.pagesCount - 1) {
-            page = this.pdfViewer.getPageView(currentPageIdx + 1);
-            if (page.textLayer) {
-              page.textLayer.updateSelections();
-            }
-          }
-
         }
       }
     }

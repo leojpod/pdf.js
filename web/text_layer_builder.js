@@ -221,6 +221,8 @@ var TextLayerBuilder = (function TextLayerBuilderClosure() {
 
     convertSelections: function TextLayerBuilder_convertSelection(selections) {
       var convertedSelections = [];
+      var bidiTexts = this.textContent.items;
+      var textDivs = this.textDivs;
 
       var getIndex = function () {
         var prop = document.body.previousElementSibling ? 'previousElementSibling' : 'previousSibling';
@@ -247,16 +249,42 @@ var TextLayerBuilder = (function TextLayerBuilderClosure() {
           // 1 - identify where it starts
           var inPageSelection = {
             begin: {
-              divIdx: getIndex(range.startContainer.parentElement),
+              divIdx: getIndex(range.startContainer.parentElement) - 1,
               offset: range.startOffset
             },
             end: {
-              divIdx: getIndex(range.endContainer.parentElement),
+              divIdx: getIndex(range.endContainer.parentElement) - 1,
               offset: range.endOffset
             }
           };
           convertedSelections.push(inPageSelection);
-        } //else // TODO deal with multi-page selection
+        } else if (range.startContainer.parentElement.parentElement === this.textLayerDiv) {
+          // the range starts on this page and continue on the next:
+          var firstPartOfSelection = {
+            begin: {
+              divIdx: getIndex(range.startContainer.parentElement) - 1,
+              offset: range.startOffset
+            },
+            end: { // select the last div and the last char
+              divIdx: textDivs.length - 1,
+              offset: bidiTexts[textDivs.length - 1].str.length - 1
+            }
+          };
+          convertedSelections.push(firstPartOfSelection);
+        } else if (range.endContainer.parentElement.parentElement === this.textLayerDiv) {
+          // the range starts on the previous page and finish on this one:
+          var secondPartOfSelection = {
+            begin: {
+              divIdx: 0,
+              offset: 0
+            },
+            end: {
+              divIdx: getIndex(range.endContainer.parentElement) - 1,
+              offset: range.endOffset
+            }
+          };
+          convertedSelections.push(secondPartOfSelection);
+        }
 
       }
       console.log('converted ', convertedSelections.length, ' out of ', selections.length, ' original ranges');
@@ -264,7 +292,6 @@ var TextLayerBuilder = (function TextLayerBuilderClosure() {
     },
 
     renderSelections: function TextLayerBuilder_renderSelections(selections) {
-      // TODO follow inspiration from render Match and deal with that.
       // Early exit if there is nothing to render
       if (selections.length === 0) {
         return;
