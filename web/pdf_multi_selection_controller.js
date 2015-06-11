@@ -32,9 +32,10 @@ var PDFMultiSelectionController = (function PDFMultiSelectionControllerClosure()
         self.updateSelections();
       }
 
-      console.log('selections -> ', self.selections);
       //reset selectionChanged
       selectionChanged = false;
+      //clear out the selection for cleaner results
+      window.getSelection().removeAllRanges();
     })
   }
 
@@ -55,23 +56,3 @@ var PDFMultiSelectionController = (function PDFMultiSelectionControllerClosure()
   };
   return PDFMultiSelectionController;
 })();
-
-//document.addEventListener('selectionchange', function (e) {
-//  console.log('selection changed');
-//  var i;
-//  //add the new selection to the old
-//
-//  //version 1 -> brute force -> add all the previous selection
-//  if (previousSelection !== null) {
-//    for (i = 0; i < previousSelection.length; i += 1) {
-//      window.getSelection().addRange(previousSelection[i]);
-//    }
-//  }
-//
-//  //update previousSelection to match the new one
-//  previousSelection = [];
-//  for (i = 0 ; i < window.getSelection().rangeCount; i += 1) {
-//    previousSelection[i] = window.getSelection().getRangeAt(i);
-//  }
-//
-//});

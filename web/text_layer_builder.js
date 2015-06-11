@@ -287,7 +287,7 @@ var TextLayerBuilder = (function TextLayerBuilderClosure() {
         }
 
       }
-      console.log('converted ', convertedSelections.length, ' out of ', selections.length, ' original ranges');
+      //console.log('converted ', convertedSelections.length, ' out of ', selections.length, ' original ranges');
       return convertedSelections;
     },
 
@@ -384,7 +384,7 @@ var TextLayerBuilder = (function TextLayerBuilderClosure() {
 
     updateSelections: function TextLayerBuilder_updateSelections() {
 
-      console.info('updateSelections!');
+      //console.info('updateSelections!');
       // Only show matches when all rendering is done.
       if (!this.renderingDone) {
         return;
@@ -426,7 +426,7 @@ var TextLayerBuilder = (function TextLayerBuilderClosure() {
       // used for the textLayer.
       this.selections = this.convertSelections(this.multiSelectionController === null ?
           [] : (this.multiSelectionController.selections || []));
-      console.log('converted selections -> ', this.selections);
+      //console.log('converted selections -> ', this.selections);
       this.renderSelections(this.selections);
 
     },
