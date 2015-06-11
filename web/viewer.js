@@ -169,7 +169,10 @@ var PDFViewerApplication = {
       integratedFind: this.supportsIntegratedFind
     });
     this.pdfViewer.setFindController(this.findController);
-    this.multiSelectionController = new PDFMultiSelectionController();
+    
+    this.multiSelectionController = new PDFMultiSelectionController({
+      pdfViewer: this.pdfViewer
+    });
     this.pdfViewer.setMultiSelectionController(this.multiSelectionController);
 
     this.findBar = new PDFFindBar({
