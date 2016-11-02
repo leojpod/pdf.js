@@ -1,5 +1,3 @@
-/* -*- Mode: Java; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set shiftwidth=2 tabstop=2 autoindent cindent expandtab: */
 /* Copyright 2012 Mozilla Foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,11 +12,35 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-/* globals bytesToString, DecryptStream, error, isInt, isName, Name,
-           PasswordException, PasswordResponses, stringToBytes, warn,
-           utf8StringToString */
 
 'use strict';
+
+(function (root, factory) {
+  if (typeof define === 'function' && define.amd) {
+    define('pdfjs/core/crypto', ['exports', 'pdfjs/shared/util',
+      'pdfjs/core/primitives', 'pdfjs/core/stream'], factory);
+  } else if (typeof exports !== 'undefined') {
+    factory(exports, require('../shared/util.js'), require('./primitives.js'),
+      require('./stream.js'));
+  } else {
+    factory((root.pdfjsCoreCrypto = {}), root.pdfjsSharedUtil,
+      root.pdfjsCorePrimitives, root.pdfjsCoreStream);
+  }
+}(this, function (exports, sharedUtil, corePrimitives, coreStream) {
+
+var PasswordException = sharedUtil.PasswordException;
+var PasswordResponses = sharedUtil.PasswordResponses;
+var bytesToString = sharedUtil.bytesToString;
+var warn = sharedUtil.warn;
+var error = sharedUtil.error;
+var assert = sharedUtil.assert;
+var isInt = sharedUtil.isInt;
+var stringToBytes = sharedUtil.stringToBytes;
+var utf8StringToString = sharedUtil.utf8StringToString;
+var Name = corePrimitives.Name;
+var isName = corePrimitives.isName;
+var isDict = corePrimitives.isDict;
+var DecryptStream = coreStream.DecryptStream;
 
 var ARCFourCipher = (function ARCFourCipherClosure() {
   function ARCFourCipher(key) {
@@ -476,8 +498,7 @@ var calculateSHA512 = (function calculateSHA512Closure() {
       h5 = new Word64(0x9b05688c, 0x2b3e6c1f);
       h6 = new Word64(0x1f83d9ab, 0xfb41bd6b);
       h7 = new Word64(0x5be0cd19, 0x137e2179);
-    }
-    else {
+    } else {
       // SHA384 is exactly the same
       // except with different starting values and a trimmed result
       h0 = new Word64(0xcbbb9d5d, 0xc1059ed8);
@@ -596,8 +617,7 @@ var calculateSHA512 = (function calculateSHA512Closure() {
       h5.copyTo(result,40);
       h6.copyTo(result,48);
       h7.copyTo(result,56);
-    }
-    else {
+    } else {
       result = new Uint8Array(48);
       h0.copyTo(result,0);
       h1.copyTo(result,8);
@@ -1629,11 +1649,9 @@ var PDF20 = (function PDF20Closure() {
       }
       if (remainder === 0) {
         k = calculateSHA256(e, 0, e.length);
-      }
-      else if (remainder === 1) {
+      } else if (remainder === 1) {
         k = calculateSHA384(e, 0, e.length);
-      }
-      else if (remainder === 2) {
+      } else if (remainder === 2) {
         k = calculateSHA512(e, 0, e.length);
       }
       i++;
@@ -1758,16 +1776,15 @@ var CipherTransformFactory = (function CipherTransformFactoryClosure() {
       pdfAlgorithm = new PDF17();
     }
 
-    if (pdfAlgorithm) {
-      if (pdfAlgorithm.checkUserPassword(password, userValidationSalt,
-                                         userPassword)) {
-        return pdfAlgorithm.getUserKey(password, userKeySalt, userEncryption);
-      } else if (pdfAlgorithm.checkOwnerPassword(password, ownerValidationSalt,
-                                                 uBytes,
-                                                 ownerPassword)) {
-        return pdfAlgorithm.getOwnerKey(password, ownerKeySalt, uBytes,
-                                        ownerEncryption);
-      }
+    if (pdfAlgorithm.checkUserPassword(password, userValidationSalt,
+                                        userPassword)) {
+      return pdfAlgorithm.getUserKey(password, userKeySalt, userEncryption);
+    } else if (password.length && pdfAlgorithm.checkOwnerPassword(password,
+                                                  ownerValidationSalt,
+                                                  uBytes,
+                                                  ownerPassword)) {
+      return pdfAlgorithm.getOwnerKey(password, ownerKeySalt, uBytes,
+                                      ownerEncryption);
     }
 
     return null;
@@ -1889,7 +1906,7 @@ var CipherTransformFactory = (function CipherTransformFactoryClosure() {
 
   function CipherTransformFactory(dict, fileId, password) {
     var filter = dict.get('Filter');
-    if (!isName(filter) || filter.name !== 'Standard') {
+    if (!isName(filter, 'Standard')) {
       error('unknown encryption method');
     }
     this.dict = dict;
@@ -1900,7 +1917,28 @@ var CipherTransformFactory = (function CipherTransformFactoryClosure() {
       error('unsupported encryption algorithm');
     }
     this.algorithm = algorithm;
-    var keyLength = dict.get('Length') || 40;
+    var keyLength = dict.get('Length');
+    if (!keyLength) {
+      // Spec asks to rely on encryption dictionary's Length entry, however
+      // some PDFs don't have it. Trying to recover.
+      if (algorithm <= 3) {
+        // For 1 and 2 it's fixed to 40-bit, for 3 40-bit is a minimal value.
+        keyLength = 40;
+      } else {
+        // Trying to find default handler -- it usually has Length.
+        var cfDict = dict.get('CF');
+        var streamCryptoName = dict.get('StmF');
+        if (isDict(cfDict) && isName(streamCryptoName)) {
+          cfDict.suppressEncryption = true; // See comment below.
+          var handlerDict = cfDict.get(streamCryptoName.name);
+          keyLength = (handlerDict && handlerDict.get('Length')) || 128;
+          if (keyLength < 40) {
+            // Sometimes it's incorrect value of bits, generators specify bytes.
+            keyLength <<= 3;
+          }
+        }
+      }
+    }
     if (!isInt(keyLength) ||
         keyLength < 40 || (keyLength % 8) !== 0) {
       error('invalid key length');
@@ -1935,8 +1973,7 @@ var CipherTransformFactory = (function CipherTransformFactoryClosure() {
       encryptionKey = prepareKeyData(fileIdBytes, passwordBytes,
                                      ownerPassword, userPassword, flags,
                                      revision, keyLength, encryptMetadata);
-    }
-    else {
+    } else {
       var ownerValidationSalt = stringToBytes(dict.get('O')).subarray(32, 40);
       var ownerKeySalt = stringToBytes(dict.get('O')).subarray(40, 48);
       var uBytes = stringToBytes(dict.get('U')).subarray(0, 48);
@@ -1973,7 +2010,15 @@ var CipherTransformFactory = (function CipherTransformFactoryClosure() {
     this.encryptionKey = encryptionKey;
 
     if (algorithm >= 4) {
-      this.cf = dict.get('CF');
+      var cf = dict.get('CF');
+      if (isDict(cf)) {
+        // The 'CF' dictionary itself should not be encrypted, and by setting
+        // `suppressEncryption` we can prevent an infinite loop inside of
+        // `XRef_fetchUncompressed` if the dictionary contains indirect objects
+        // (fixes issue7665.pdf).
+        cf.suppressEncryption = true;
+      }
+      this.cf = cf;
       this.stmf = dict.get('StmF') || identityName;
       this.strf = dict.get('StrF') || identityName;
       this.eff = dict.get('EFF') || this.stmf;
@@ -2001,6 +2046,7 @@ var CipherTransformFactory = (function CipherTransformFactoryClosure() {
   }
 
   function buildCipherConstructor(cf, name, num, gen, key) {
+    assert(isName(name), 'Invalid crypt filter name.');
     var cryptFilter = cf.get(name.name);
     var cfm;
     if (cryptFilter !== null && cryptFilter !== undefined) {
@@ -2050,3 +2096,15 @@ var CipherTransformFactory = (function CipherTransformFactoryClosure() {
 
   return CipherTransformFactory;
 })();
+
+exports.AES128Cipher = AES128Cipher;
+exports.AES256Cipher = AES256Cipher;
+exports.ARCFourCipher = ARCFourCipher;
+exports.CipherTransformFactory = CipherTransformFactory;
+exports.PDF17 = PDF17;
+exports.PDF20 = PDF20;
+exports.calculateMD5 = calculateMD5;
+exports.calculateSHA256 = calculateSHA256;
+exports.calculateSHA384 = calculateSHA384;
+exports.calculateSHA512 = calculateSHA512;
+}));

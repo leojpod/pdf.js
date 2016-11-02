@@ -1,4 +1,3 @@
-/* -*- Mode: Java; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 /* Copyright 2014 Mozilla Foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -99,20 +98,24 @@ IPDFTextLayerFactory.prototype = {
    * @param {HTMLDivElement} textLayerDiv
    * @param {number} pageIndex
    * @param {PageViewport} viewport
+   * @param {boolean} enhanceTextSelection
    * @returns {TextLayerBuilder}
    */
-  createTextLayerBuilder: function (textLayerDiv, pageIndex, viewport) {}
+  createTextLayerBuilder: function (textLayerDiv, pageIndex, viewport,
+                                    enhanceTextSelection) {}
 };
 
 /**
  * @interface
  */
-function IPDFAnnotationsLayerFactory() {}
-IPDFAnnotationsLayerFactory.prototype = {
+function IPDFAnnotationLayerFactory() {}
+IPDFAnnotationLayerFactory.prototype = {
   /**
    * @param {HTMLDivElement} pageDiv
    * @param {PDFPage} pdfPage
-   * @returns {AnnotationsLayerBuilder}
+   * @param {boolean} renderInteractiveForms
+   * @returns {AnnotationLayerBuilder}
    */
-  createAnnotationsLayerBuilder: function (pageDiv, pdfPage) {}
+  createAnnotationLayerBuilder: function (pageDiv, pdfPage,
+                                          renderInteractiveForms) {}
 };

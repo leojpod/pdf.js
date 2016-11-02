@@ -1,4 +1,3 @@
-/* -*- Mode: Java; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
 /* Copyright 2012 Mozilla Foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,24 +12,32 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-/* globals CustomStyle, PDFJS */
 
 'use strict';
 
-var MAX_TEXT_DIVS_TO_RENDER = 100000;
+(function (root, factory) {
+  if (typeof define === 'function' && define.amd) {
+    define('pdfjs-web/text_layer_builder', ['exports', 'pdfjs-web/dom_events',
+        'pdfjs-web/pdfjs'], factory);
+  } else if (typeof exports !== 'undefined') {
+    factory(exports, require('./dom_events.js'), require('./pdfjs.js'));
+  } else {
+    factory((root.pdfjsWebTextLayerBuilder = {}), root.pdfjsWebDOMEvents,
+      root.pdfjsWebPDFJS);
+  }
+}(this, function (exports, domEvents, pdfjsLib) {
 
-var NonWhitespaceRegexp = /\S/;
-
-function isAllWhitespace(str) {
-  return !NonWhitespaceRegexp.test(str);
-}
+var EXPAND_DIVS_TIMEOUT = 300; // ms
 
 /**
  * @typedef {Object} TextLayerBuilderOptions
  * @property {HTMLDivElement} textLayerDiv - The text layer container.
+ * @property {EventBus} eventBus - The application event bus.
  * @property {number} pageIndex - The page index.
  * @property {PageViewport} viewport - The viewport of the text layer.
  * @property {PDFFindController} findController
+ * @property {boolean} enhanceTextSelection - Option to turn on improved
+ *   text selection.
  */
 
 /**
@@ -43,83 +50,38 @@ function isAllWhitespace(str) {
 var TextLayerBuilder = (function TextLayerBuilderClosure() {
   function TextLayerBuilder(options) {
     this.textLayerDiv = options.textLayerDiv;
+    this.eventBus = options.eventBus || domEvents.getGlobalEventBus();
+    this.textContent = null;
     this.renderingDone = false;
-    this.divContentDone = false;
     this.pageIdx = options.pageIndex;
     this.pageNumber = this.pageIdx + 1;
     this.matches = [];
     this.viewport = options.viewport;
     this.textDivs = [];
     this.findController = options.findController || null;
+    this.textLayerRenderTask = null;
+    this.enhanceTextSelection = options.enhanceTextSelection;
+    this._bindMouse();
   }
 
   TextLayerBuilder.prototype = {
+    /**
+     * @private
+     */
     _finishRendering: function TextLayerBuilder_finishRendering() {
       this.renderingDone = true;
 
-      var event = document.createEvent('CustomEvent');
-      event.initCustomEvent('textlayerrendered', true, true, {
-        pageNumber: this.pageNumber
+      if (!this.enhanceTextSelection) {
+        var endOfContent = document.createElement('div');
+        endOfContent.className = 'endOfContent';
+        this.textLayerDiv.appendChild(endOfContent);
+      }
+
+      this.eventBus.dispatch('textlayerrendered', {
+        source: this,
+        pageNumber: this.pageNumber,
+        numTextDivs: this.textDivs.length,
       });
-      this.textLayerDiv.dispatchEvent(event);
-    },
-
-    renderLayer: function TextLayerBuilder_renderLayer() {
-      var textLayerFrag = document.createDocumentFragment();
-      var textDivs = this.textDivs;
-      var textDivsLength = textDivs.length;
-      var canvas = document.createElement('canvas');
-      var ctx = canvas.getContext('2d');
-
-      // No point in rendering many divs as it would make the browser
-      // unusable even after the divs are rendered.
-      if (textDivsLength > MAX_TEXT_DIVS_TO_RENDER) {
-        this._finishRendering();
-        return;
-      }
-
-      var lastFontSize;
-      var lastFontFamily;
-      for (var i = 0; i < textDivsLength; i++) {
-        var textDiv = textDivs[i];
-        if (textDiv.dataset.isWhitespace !== undefined) {
-          continue;
-        }
-
-        var fontSize = textDiv.style.fontSize;
-        var fontFamily = textDiv.style.fontFamily;
-
-        // Only build font string and set to context if different from last.
-        if (fontSize !== lastFontSize || fontFamily !== lastFontFamily) {
-          ctx.font = fontSize + ' ' + fontFamily;
-          lastFontSize = fontSize;
-          lastFontFamily = fontFamily;
-        }
-
-        var width = ctx.measureText(textDiv.textContent).width;
-        if (width > 0) {
-          textLayerFrag.appendChild(textDiv);
-          var transform;
-          if (textDiv.dataset.canvasWidth !== undefined) {
-            // Dataset values come of type string.
-            var textScale = textDiv.dataset.canvasWidth / width;
-            transform = 'scaleX(' + textScale + ')';
-          } else {
-            transform = '';
-          }
-          var rotation = textDiv.dataset.angle;
-          if (rotation) {
-            transform = 'rotate(' + rotation + 'deg) ' + transform;
-          }
-          if (transform) {
-            CustomStyle.setProp('transform' , textDiv, transform);
-          }
-        }
-      }
-
-      this.textLayerDiv.appendChild(textLayerFrag);
-      this._finishRendering();
-      this.updateMatches();
     },
 
     /**
@@ -128,95 +90,47 @@ var TextLayerBuilder = (function TextLayerBuilderClosure() {
      *   for specified amount of ms.
      */
     render: function TextLayerBuilder_render(timeout) {
-      if (!this.divContentDone || this.renderingDone) {
+      if (!this.textContent || this.renderingDone) {
         return;
       }
+      this.cancel();
 
-      if (this.renderTimer) {
-        clearTimeout(this.renderTimer);
-        this.renderTimer = null;
-      }
-
-      if (!timeout) { // Render right away
-        this.renderLayer();
-      } else { // Schedule
-        var self = this;
-        this.renderTimer = setTimeout(function() {
-          self.renderLayer();
-          self.renderTimer = null;
-        }, timeout);
-      }
+      this.textDivs = [];
+      var textLayerFrag = document.createDocumentFragment();
+      this.textLayerRenderTask = pdfjsLib.renderTextLayer({
+        textContent: this.textContent,
+        container: textLayerFrag,
+        viewport: this.viewport,
+        textDivs: this.textDivs,
+        timeout: timeout,
+        enhanceTextSelection: this.enhanceTextSelection,
+      });
+      this.textLayerRenderTask.promise.then(function () {
+        this.textLayerDiv.appendChild(textLayerFrag);
+        this._finishRendering();
+        this.updateMatches();
+      }.bind(this), function (reason) {
+        // cancelled or failed to render text layer -- skipping errors
+      });
     },
 
-    appendText: function TextLayerBuilder_appendText(geom, styles) {
-      var style = styles[geom.fontName];
-      var textDiv = document.createElement('div');
-      this.textDivs.push(textDiv);
-      if (isAllWhitespace(geom.str)) {
-        textDiv.dataset.isWhitespace = true;
-        return;
-      }
-      var tx = PDFJS.Util.transform(this.viewport.transform, geom.transform);
-      var angle = Math.atan2(tx[1], tx[0]);
-      if (style.vertical) {
-        angle += Math.PI / 2;
-      }
-      var fontHeight = Math.sqrt((tx[2] * tx[2]) + (tx[3] * tx[3]));
-      var fontAscent = fontHeight;
-      if (style.ascent) {
-        fontAscent = style.ascent * fontAscent;
-      } else if (style.descent) {
-        fontAscent = (1 + style.descent) * fontAscent;
-      }
-
-      var left;
-      var top;
-      if (angle === 0) {
-        left = tx[4];
-        top = tx[5] - fontAscent;
-      } else {
-        left = tx[4] + (fontAscent * Math.sin(angle));
-        top = tx[5] - (fontAscent * Math.cos(angle));
-      }
-      textDiv.style.left = left + 'px';
-      textDiv.style.top = top + 'px';
-      textDiv.style.fontSize = fontHeight + 'px';
-      textDiv.style.fontFamily = style.fontFamily;
-
-      textDiv.textContent = geom.str;
-      // |fontName| is only used by the Font Inspector. This test will succeed
-      // when e.g. the Font Inspector is off but the Stepper is on, but it's
-      // not worth the effort to do a more accurate test.
-      if (PDFJS.pdfBug) {
-        textDiv.dataset.fontName = geom.fontName;
-      }
-      // Storing into dataset will convert number into string.
-      if (angle !== 0) {
-        textDiv.dataset.angle = angle * (180 / Math.PI);
-      }
-      // We don't bother scaling single-char text divs, because it has very
-      // little effect on text highlighting. This makes scrolling on docs with
-      // lots of such divs a lot faster.
-      if (textDiv.textContent.length > 1) {
-        if (style.vertical) {
-          textDiv.dataset.canvasWidth = geom.height * this.viewport.scale;
-        } else {
-          textDiv.dataset.canvasWidth = geom.width * this.viewport.scale;
-        }
+    /**
+     * Cancels rendering of the text layer.
+     */
+    cancel: function TextLayerBuilder_cancel() {
+      if (this.textLayerRenderTask) {
+        this.textLayerRenderTask.cancel();
+        this.textLayerRenderTask = null;
       }
     },
 
     setTextContent: function TextLayerBuilder_setTextContent(textContent) {
+      this.cancel();
       this.textContent = textContent;
-
-      var textItems = textContent.items;
-      for (var i = 0, len = textItems.length; i < len; i++) {
-        this.appendText(textItems[i], textContent.styles);
-      }
-      this.divContentDone = true;
     },
 
-    convertMatches: function TextLayerBuilder_convertMatches(matches) {
+    convertMatches: function TextLayerBuilder_convertMatches(matches,
+                                                             matchesLength) {
       var i = 0;
       var iIndex = 0;
       var bidiTexts = this.textContent.items;
@@ -224,7 +138,9 @@ var TextLayerBuilder = (function TextLayerBuilderClosure() {
       var queryLen = (this.findController === null ?
                       0 : this.findController.state.query.length);
       var ret = [];
-
+      if (!matches) {
+        return ret;
+      }
       for (var m = 0, len = matches.length; m < len; m++) {
         // Calculate the start position.
         var matchIdx = matches[m];
@@ -247,7 +163,11 @@ var TextLayerBuilder = (function TextLayerBuilderClosure() {
         };
 
         // Calculate the end position.
-        matchIdx += queryLen;
+        if (matchesLength) { // multiterm search
+          matchIdx += matchesLength[m];
+        } else { // phrase search
+          matchIdx += queryLen;
+        }
 
         // Somewhat the same array as above, but use > instead of >= to get
         // the end position right.
@@ -325,7 +245,7 @@ var TextLayerBuilder = (function TextLayerBuilderClosure() {
 
         if (this.findController) {
           this.findController.updateMatchPosition(pageIdx, i, textDivs,
-                                                  begin.divIdx, end.divIdx);
+                                                  begin.divIdx);
         }
 
         // Match inside new div.
@@ -389,10 +309,88 @@ var TextLayerBuilder = (function TextLayerBuilderClosure() {
 
       // Convert the matches on the page controller into the match format
       // used for the textLayer.
-      this.matches = this.convertMatches(this.findController === null ?
-        [] : (this.findController.pageMatches[this.pageIdx] || []));
+      var pageMatches, pageMatchesLength;
+      if (this.findController !== null) {
+        pageMatches = this.findController.pageMatches[this.pageIdx] || null;
+        pageMatchesLength = (this.findController.pageMatchesLength) ?
+          this.findController.pageMatchesLength[this.pageIdx] || null : null;
+      }
+
+      this.matches = this.convertMatches(pageMatches, pageMatchesLength);
       this.renderMatches(this.matches);
-    }
+    },
+
+    /**
+     * Fixes text selection: adds additional div where mouse was clicked.
+     * This reduces flickering of the content if mouse slowly dragged down/up.
+     * @private
+     */
+    _bindMouse: function TextLayerBuilder_bindMouse() {
+      var div = this.textLayerDiv;
+      var self = this;
+      var expandDivsTimer = null;
+
+      div.addEventListener('mousedown', function (e) {
+        if (self.enhanceTextSelection && self.textLayerRenderTask) {
+          self.textLayerRenderTask.expandTextDivs(true);
+          if ((typeof PDFJSDev === 'undefined' ||
+               !PDFJSDev.test('FIREFOX || MOZCENTRAL')) &&
+              expandDivsTimer) {
+            clearTimeout(expandDivsTimer);
+            expandDivsTimer = null;
+          }
+          return;
+        }
+        var end = div.querySelector('.endOfContent');
+        if (!end) {
+          return;
+        }
+        if (typeof PDFJSDev === 'undefined' ||
+            !PDFJSDev.test('FIREFOX || MOZCENTRAL')) {
+        // On non-Firefox browsers, the selection will feel better if the height
+        // of the endOfContent div will be adjusted to start at mouse click
+        // location -- this will avoid flickering when selections moves up.
+        // However it does not work when selection started on empty space.
+        var adjustTop = e.target !== div;
+        if (typeof PDFJSDev === 'undefined' || PDFJSDev.test('GENERIC')) {
+          adjustTop = adjustTop && window.getComputedStyle(end).
+            getPropertyValue('-moz-user-select') !== 'none';
+        }
+        if (adjustTop) {
+          var divBounds = div.getBoundingClientRect();
+          var r = Math.max(0, (e.pageY - divBounds.top) / divBounds.height);
+          end.style.top = (r * 100).toFixed(2) + '%';
+        }
+        }
+        end.classList.add('active');
+      });
+
+      div.addEventListener('mouseup', function (e) {
+        if (self.enhanceTextSelection && self.textLayerRenderTask) {
+          if (typeof PDFJSDev === 'undefined' ||
+              !PDFJSDev.test('FIREFOX || MOZCENTRAL')) {
+            expandDivsTimer = setTimeout(function() {
+              if (self.textLayerRenderTask) {
+                self.textLayerRenderTask.expandTextDivs(false);
+              }
+              expandDivsTimer = null;
+            }, EXPAND_DIVS_TIMEOUT);
+          } else {
+            self.textLayerRenderTask.expandTextDivs(false);
+          }
+          return;
+        }
+        var end = div.querySelector('.endOfContent');
+        if (!end) {
+          return;
+        }
+        if (typeof PDFJSDev === 'undefined' ||
+            !PDFJSDev.test('FIREFOX || MOZCENTRAL')) {
+          end.style.top = '';
+        }
+        end.classList.remove('active');
+      });
+    },
   };
   return TextLayerBuilder;
 })();
@@ -407,13 +405,20 @@ DefaultTextLayerFactory.prototype = {
    * @param {HTMLDivElement} textLayerDiv
    * @param {number} pageIndex
    * @param {PageViewport} viewport
+   * @param {boolean} enhanceTextSelection
    * @returns {TextLayerBuilder}
    */
-  createTextLayerBuilder: function (textLayerDiv, pageIndex, viewport) {
+  createTextLayerBuilder: function (textLayerDiv, pageIndex, viewport,
+                                    enhanceTextSelection) {
     return new TextLayerBuilder({
       textLayerDiv: textLayerDiv,
       pageIndex: pageIndex,
-      viewport: viewport
+      viewport: viewport,
+      enhanceTextSelection: enhanceTextSelection
     });
   }
 };
+
+exports.TextLayerBuilder = TextLayerBuilder;
+exports.DefaultTextLayerFactory = DefaultTextLayerFactory;
+}));

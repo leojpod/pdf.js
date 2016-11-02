@@ -1,5 +1,3 @@
-/* -*- Mode: Java; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set shiftwidth=2 tabstop=2 autoindent cindent expandtab: */
 /* Copyright 2012 Mozilla Foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -14,12 +12,24 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+/* globals chrome */
 
 'use strict';
 
-var PDFHistory = (function () {
+(function (root, factory) {
+  if (typeof define === 'function' && define.amd) {
+    define('pdfjs-web/pdf_history', ['exports', 'pdfjs-web/dom_events'],
+      factory);
+  } else if (typeof exports !== 'undefined') {
+    factory(exports, require('./dom_events.js'));
+  } else {
+    factory((root.pdfjsWebPDFHistory = {}), root.pdfjsWebDOMEvents);
+  }
+}(this, function (exports, domEvents) {
+
   function PDFHistory(options) {
     this.linkService = options.linkService;
+    this.eventBus = options.eventBus || domEvents.getGlobalEventBus();
 
     this.initialized = false;
     this.initialDestination = null;
@@ -29,7 +39,6 @@ var PDFHistory = (function () {
   PDFHistory.prototype = {
     /**
      * @param {string} fingerprint
-     * @param {IPDFLinkService} linkService
      */
     initialize: function pdfHistoryInitialize(fingerprint) {
       this.initialized = true;
@@ -75,37 +84,73 @@ var PDFHistory = (function () {
 
       var self = this;
       window.addEventListener('popstate', function pdfHistoryPopstate(evt) {
-        evt.preventDefault();
-        evt.stopPropagation();
-
         if (!self.historyUnlocked) {
           return;
         }
         if (evt.state) {
           // Move back/forward in the history.
           self._goTo(evt.state);
-        } else {
-          // Handle the user modifying the hash of a loaded document.
-          self.previousHash = window.location.hash.substring(1);
+          return;
+        }
 
-          // If the history is empty when the hash changes,
-          // update the previous entry in the browser history.
-          if (self.uid === 0) {
-            var previousParams = (self.previousHash && self.currentBookmark &&
+        // If the state is not set, then the user tried to navigate to a
+        // different hash by manually editing the URL and pressing Enter, or by
+        // clicking on an in-page link (e.g. the "current view" link).
+        // Save the current view state to the browser history.
+
+        // Note: In Firefox, history.null could also be null after an in-page
+        // navigation to the same URL, and without dispatching the popstate
+        // event: https://bugzilla.mozilla.org/show_bug.cgi?id=1183881
+
+        if (self.uid === 0) {
+          // Replace the previous state if it was not explicitly set.
+          var previousParams = (self.previousHash && self.currentBookmark &&
             self.previousHash !== self.currentBookmark) ?
             {hash: self.currentBookmark, page: self.currentPage} :
             {page: 1};
-            self.historyUnlocked = false;
-            self.allowHashChange = false;
-            window.history.back();
-            self._pushToHistory(previousParams, false, true);
-            window.history.forward();
-            self.historyUnlocked = true;
-          }
-          self._pushToHistory({hash: self.previousHash}, false, true);
-          self._updatePreviousBookmark();
+          replacePreviousHistoryState(previousParams, function() {
+            updateHistoryWithCurrentHash();
+          });
+        } else {
+          updateHistoryWithCurrentHash();
         }
       }, false);
+
+
+      function updateHistoryWithCurrentHash() {
+        self.previousHash = window.location.hash.slice(1);
+        self._pushToHistory({hash: self.previousHash}, false, true);
+        self._updatePreviousBookmark();
+      }
+
+      function replacePreviousHistoryState(params, callback) {
+        // To modify the previous history entry, the following happens:
+        // 1. history.back()
+        // 2. _pushToHistory, which calls history.replaceState( ... )
+        // 3. history.forward()
+        // Because a navigation via the history API does not immediately update
+        // the history state, the popstate event is used for synchronization.
+        self.historyUnlocked = false;
+
+        // Suppress the hashchange event to avoid side effects caused by
+        // navigating back and forward.
+        self.allowHashChange = false;
+        window.addEventListener('popstate', rewriteHistoryAfterBack);
+        history.back();
+
+        function rewriteHistoryAfterBack() {
+          window.removeEventListener('popstate', rewriteHistoryAfterBack);
+          window.addEventListener('popstate', rewriteHistoryAfterForward);
+          self._pushToHistory(params, false, true);
+          history.forward();
+        }
+        function rewriteHistoryAfterForward() {
+          window.removeEventListener('popstate', rewriteHistoryAfterForward);
+          self.allowHashChange = true;
+          self.historyUnlocked = true;
+          callback();
+        }
+      }
 
       function pdfHistoryBeforeUnload() {
         var previousParams = self._getPreviousParams(null, true);
@@ -130,8 +175,8 @@ var PDFHistory = (function () {
         window.addEventListener('beforeunload', pdfHistoryBeforeUnload, false);
       }, false);
 
-      window.addEventListener('presentationmodechanged', function(e) {
-        self.isViewerInPresentationMode = !!e.detail.active;
+      self.eventBus.on('presentationmodechanged', function(e) {
+        self.isViewerInPresentationMode = e.active;
       });
     },
 
@@ -147,30 +192,30 @@ var PDFHistory = (function () {
 
     _pushOrReplaceState: function pdfHistory_pushOrReplaceState(stateObj,
                                                                 replace) {
-//#if CHROME
       // history.state.chromecomState is managed by chromecom.js.
-      if (window.history.state && 'chromecomState' in window.history.state) {
+      if (typeof PDFJSDev !== 'undefined' && PDFJSDev.test('CHROME') &&
+          window.history.state && 'chromecomState' in window.history.state) {
         stateObj = stateObj || {};
         stateObj.chromecomState = window.history.state.chromecomState;
       }
-//#endif
       if (replace) {
-//#if (GENERIC || CHROME)
-        window.history.replaceState(stateObj, '', document.URL);
-//#else
-//    window.history.replaceState(stateObj, '');
-//#endif
+        if (typeof PDFJSDev === 'undefined' ||
+            PDFJSDev.test('GENERIC || CHROME')) {
+          window.history.replaceState(stateObj, '', document.URL);
+        } else {
+          window.history.replaceState(stateObj, '');
+        }
       } else {
-//#if (GENERIC || CHROME)
-        window.history.pushState(stateObj, '', document.URL);
-//#else
-//    window.history.pushState(stateObj, '');
-//#endif
-//#if CHROME
-//    if (top === window) {
-//      chrome.runtime.sendMessage('showPageAction');
-//    }
-//#endif
+        if (typeof PDFJSDev === 'undefined' ||
+            PDFJSDev.test('GENERIC || CHROME')) {
+          window.history.pushState(stateObj, '', document.URL);
+        } else {
+          window.history.pushState(stateObj, '');
+        }
+        if (typeof PDFJSDev !== 'undefined' && PDFJSDev.test('CHROME') &&
+            top === window) {
+          chrome.runtime.sendMessage('showPageAction');
+        }
       }
     },
 
@@ -178,19 +223,7 @@ var PDFHistory = (function () {
       if (!this.initialized) {
         return true;
       }
-      // If the current hash changes when moving back/forward in the history,
-      // this will trigger a 'popstate' event *as well* as a 'hashchange' event.
-      // Since the hash generally won't correspond to the exact the position
-      // stored in the history's state object, triggering the 'hashchange' event
-      // can thus corrupt the browser history.
-      //
-      // When the hash changes during a 'popstate' event, we *only* prevent the
-      // first 'hashchange' event and immediately reset allowHashChange.
-      // If it is not reset, the user would not be able to change the hash.
-
-      var temp = this.allowHashChange;
-      this.allowHashChange = true;
-      return temp;
+      return this.allowHashChange;
     },
 
     _updatePreviousBookmark: function pdfHistory_updatePreviousBookmark() {
@@ -401,5 +434,5 @@ var PDFHistory = (function () {
     }
   };
 
-  return PDFHistory;
-})();
+  exports.PDFHistory = PDFHistory;
+}));

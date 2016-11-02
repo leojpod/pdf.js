@@ -1,5 +1,3 @@
-/* -*- Mode: Java; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set shiftwidth=2 tabstop=2 autoindent cindent expandtab: */
 /*
 Copyright 2012 Mozilla Foundation
 
@@ -34,9 +32,15 @@ function isPdfDownloadable(details) {
   if (details.url.indexOf('pdfjs.action=download') >= 0) {
     return true;
   }
-  // Display the PDF viewer regardless of the Content-Disposition header
-  // if the file is displayed in the main frame.
-  if (details.type === 'main_frame') {
+  // Display the PDF viewer regardless of the Content-Disposition header if the
+  // file is displayed in the main frame, since most often users want to view
+  // a PDF, and servers are often misconfigured.
+  // If the query string contains "=download", do not unconditionally force the
+  // viewer to open the PDF, but first check whether the Content-Disposition
+  // header specifies an attachment. This allows sites like Google Drive to
+  // operate correctly (#6106).
+  if (details.type === 'main_frame' &&
+      details.url.indexOf('=download') === -1) {
     return false;
   }
   var cdHeader = (details.responseHeaders &&
@@ -69,9 +73,19 @@ function isPdfFile(details) {
   var header = getHeaderFromHeaders(details.responseHeaders, 'content-type');
   if (header) {
     var headerValue = header.value.toLowerCase().split(';',1)[0].trim();
-    return (headerValue === 'application/pdf' ||
-            headerValue === 'application/octet-stream' &&
-            details.url.toLowerCase().indexOf('.pdf') > 0);
+    if (headerValue === 'application/pdf') {
+      return true;
+    }
+    if (headerValue === 'application/octet-stream') {
+      if (details.url.toLowerCase().indexOf('.pdf') > 0) {
+        return true;
+      }
+      var cdHeader =
+        getHeaderFromHeaders(details.responseHeaders, 'content-disposition');
+      if (cdHeader && /\.pdf(["']|$)/i.test(cdHeader.value)) {
+        return true;
+      }
+    }
   }
 }
 
@@ -130,45 +144,8 @@ chrome.webRequest.onHeadersReceived.addListener(
       });
       return { cancel: true };
     } else {
-      // Sub frame. Requires some more work...
-      // The navigation will be cancelled at the end of the webRequest cycle.
-      chrome.webNavigation.onErrorOccurred.addListener(function listener(nav) {
-        if (nav.tabId !== details.tabId || nav.frameId !== details.frameId) {
-          return;
-        }
-        chrome.webNavigation.onErrorOccurred.removeListener(listener);
-
-        // Locate frame and insert viewer
-        chrome.tabs.executeScriptInFrame(details.tabId, {
-          frameId: details.frameId,
-          code: 'location.href = ' + JSON.stringify(viewerUrl) + ';'
-        }, function(result) {
-          if (!result) {
-            console.warn('Frame not found! Opening viewer in new tab...');
-            chrome.tabs.create({
-              url: viewerUrl
-            });
-          }
-        });
-      }, {
-        url: [{ urlEquals: details.url.split('#', 1)[0] }]
-      });
-      // Prevent frame from rendering by using X-Frame-Options.
-      // Do not use { cancel: true }, because that makes the frame inaccessible
-      // to the content script that has to replace the frame's URL.
-      return {
-        responseHeaders: [{
-          name: 'X-Content-Type-Options',
-          value: 'nosniff'
-        }, {
-          name: 'X-Frame-Options',
-          value: 'deny'
-        }]
-      };
+      console.warn('Child frames are not supported in ancient Chrome builds!');
     }
-
-    // Immediately abort the request, because the frame that initiated the
-    // request will be replaced with the PDF Viewer (within a split second).
   },
   {
     urls: [
@@ -220,3 +197,77 @@ chrome.webRequest.onBeforeRequest.addListener(
     types: ['main_frame', 'sub_frame']
   },
   ['blocking']);
+
+chrome.extension.isAllowedFileSchemeAccess(function(isAllowedAccess) {
+  if (isAllowedAccess) {
+    return;
+  }
+  // If the user has not granted access to file:-URLs, then the webRequest API
+  // will not catch the request. It is still visible through the webNavigation
+  // API though, and we can replace the tab with the viewer.
+  // The viewer will detect that it has no access to file:-URLs, and prompt the
+  // user to activate file permissions.
+  chrome.webNavigation.onBeforeNavigate.addListener(function(details) {
+    if (details.frameId === 0 && !isPdfDownloadable(details)) {
+      chrome.tabs.update(details.tabId, {
+        url: getViewerURL(details.url)
+      });
+    }
+  }, {
+    url: [{
+      urlPrefix: 'file://',
+      pathSuffix: '.pdf'
+    }, {
+      urlPrefix: 'file://',
+      pathSuffix: '.PDF'
+    }]
+  });
+});
+
+chrome.runtime.onMessage.addListener(function(message, sender, sendResponse) {
+  if (message && message.action === 'getParentOrigin') {
+    // getParentOrigin is used to determine whether it is safe to embed a
+    // sensitive (local) file in a frame.
+    if (!sender.tab) {
+      sendResponse('');
+      return;
+    }
+    // TODO: This should be the URL of the parent frame, not the tab. But
+    // chrome-extension:-URLs are not visible in the webNavigation API
+    // (https://crbug.com/326768), so the next best thing is using the tab's URL
+    // for making security decisions.
+    var parentUrl = sender.tab.url;
+    if (!parentUrl) {
+      sendResponse('');
+      return;
+    }
+    if (parentUrl.lastIndexOf('file:', 0) === 0) {
+      sendResponse('file://');
+      return;
+    }
+    // The regexp should always match for valid URLs, but in case it doesn't,
+    // just give the full URL (e.g. data URLs).
+    var origin = /^[^:]+:\/\/[^/]+/.exec(parentUrl);
+    sendResponse(origin ? origin[1] : parentUrl);
+    return true;
+  }
+  if (message && message.action === 'isAllowedFileSchemeAccess') {
+    chrome.extension.isAllowedFileSchemeAccess(sendResponse);
+    return true;
+  }
+  if (message && message.action === 'openExtensionsPageForFileAccess') {
+    var url = 'chrome://extensions/?id=' + chrome.runtime.id;
+    if (message.data.newTab) {
+      chrome.tabs.create({
+        windowId: sender.tab.windowId,
+        index: sender.tab.index + 1,
+        url: url,
+        openerTabId: sender.tab.id
+      });
+    } else {
+      chrome.tabs.update(sender.tab.id, {
+        url: url
+      });
+    }
+  }
+});

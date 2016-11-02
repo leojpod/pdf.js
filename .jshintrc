@@ -3,6 +3,13 @@
   "browser": true,
   "devel": true,
   "worker": true,
+  "predef": [
+    "Promise",
+    "PDFJSDev",
+    "require",
+    "define",
+    "exports"
+  ],
 
   // Enforcing
   "maxlen": 80,

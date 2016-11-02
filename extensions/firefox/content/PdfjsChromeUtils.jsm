@@ -1,5 +1,3 @@
-/* -*- Mode: Java; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set shiftwidth=2 tabstop=2 autoindent cindent expandtab: */
 /* Copyright 2012 Mozilla Foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -15,7 +13,7 @@
  * limitations under the License.
  */
 /* jshint esnext:true */
-/* globals Components, Services, XPCOMUtils, DEFAULT_PREFERENCES */
+/* globals Components, Services, XPCOMUtils */
 
 'use strict';
 
@@ -32,14 +30,18 @@ const PDF_CONTENT_TYPE = 'application/pdf';
 Cu.import('resource://gre/modules/XPCOMUtils.jsm');
 Cu.import('resource://gre/modules/Services.jsm');
 
-let Svc = {};
+var Svc = {};
 XPCOMUtils.defineLazyServiceGetter(Svc, 'mime',
                                    '@mozilla.org/mime;1',
                                    'nsIMIMEService');
 
-//#include ../../../web/default_preferences.js
+var DEFAULT_PREFERENCES =
+//#include ../../../web/default_preferences.json
+//#if false
+  'end of DEFAULT_PREFERENCES';
+//#endif
 
-let PdfjsChromeUtils = {
+var PdfjsChromeUtils = {
   // For security purposes when running remote, we restrict preferences
   // content can access.
   _allowedPrefNames: Object.keys(DEFAULT_PREFERENCES),
@@ -51,7 +53,7 @@ let PdfjsChromeUtils = {
    */
 
   init: function () {
-    this._browsers = new Set();
+    this._browsers = new WeakSet();
     if (!this._ppmm) {
       // global parent process message manager (PPMM)
       this._ppmm = Cc['@mozilla.org/parentprocessmessagemanager;1'].
@@ -168,18 +170,7 @@ let PdfjsChromeUtils = {
   _findbarFromMessage: function(aMsg) {
     let browser = aMsg.target;
     let tabbrowser = browser.getTabBrowser();
-    let tab;
-//#if MOZCENTRAL
-    tab = tabbrowser.getTabForBrowser(browser);
-//#else
-    if (tabbrowser.getTabForBrowser) {
-      tab = tabbrowser.getTabForBrowser(browser);
-    } else {
-      // _getTabForBrowser is deprecated in Firefox 35, see
-      // https://bugzilla.mozilla.org/show_bug.cgi?id=1039500.
-      tab = tabbrowser._getTabForBrowser(browser);
-    }
-//#endif
+    let tab = tabbrowser.getTabForBrowser(browser);
     return tabbrowser.getFindBar(tab);
   },
 
@@ -306,24 +297,30 @@ let PdfjsChromeUtils = {
    * a pdf displayed correctly.
    */
   _displayWarning: function (aMsg) {
-    let json = aMsg.data;
+    let data = aMsg.data;
     let browser = aMsg.target;
-    let cpowCallback = aMsg.objects.callback;
+
     let tabbrowser = browser.getTabBrowser();
     let notificationBox = tabbrowser.getNotificationBox(browser);
-    // Flag so we don't call the response callback twice, since if the user
-    // clicks open with different viewer both the button callback and
+
+    // Flag so we don't send the message twice, since if the user clicks
+    // "open with different viewer" both the button callback and
     // eventCallback will be called.
-    let responseSent = false;
+    let messageSent = false;
+    function sendMessage(download) {
+      let mm = browser.messageManager;
+      mm.sendAsyncMessage('PDFJS:Child:fallbackDownload',
+                          { download: download });
+    }
     let buttons = [{
-      label: json.label,
-      accessKey: json.accessKey,
+      label: data.label,
+      accessKey: data.accessKey,
       callback: function() {
-        responseSent = true;
-        cpowCallback(true);
+        messageSent = true;
+        sendMessage(true);
       }
     }];
-    notificationBox.appendNotification(json.message, 'pdfjs-fallback', null,
+    notificationBox.appendNotification(data.message, 'pdfjs-fallback', null,
                                        notificationBox.PRIORITY_INFO_LOW,
                                        buttons,
                                        function eventsCallback(eventType) {
@@ -334,10 +331,10 @@ let PdfjsChromeUtils = {
       }
       // Don't send a response again if we already responded when the button was
       // clicked.
-      if (responseSent) {
+      if (messageSent) {
         return;
       }
-      cpowCallback(false);
+      sendMessage(false);
     });
   }
 };

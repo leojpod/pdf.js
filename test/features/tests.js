@@ -1,5 +1,3 @@
-/* -*- Mode: Java; tab-width: 2; indent-tabs-mode: nil; c-basic-offset: 2 -*- */
-/* vim: set shiftwidth=2 tabstop=2 autoindent cindent expandtab: */
 /* Copyright 2012 Mozilla Foundation
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -410,9 +408,6 @@ var tests = [
       if ('setLineDash' in ctx) {
         ctx.setLineDash([10, 10]);
         ctx.lineDashOffset = 0;
-      } else {
-        ctx.mozDash = [10, 10];
-        ctx.mozDashOffset = 0;
       }
       ctx.stroke();
 
@@ -563,7 +558,7 @@ var tests = [
   },
   {
     id: 'Worker-xhr-response',
-    name: 'XMLHttpRequest supports the reponse property in web workers',
+    name: 'XMLHttpRequest supports the response property in web workers',
     run: function () {
       if (typeof Worker == 'undefined')
         return { output: 'Skipped', emulated: '' };
